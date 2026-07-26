@@ -14,74 +14,66 @@ const PIPEDRIVE_BASE_URL = 'https://api.pipedrive.com/v1';
 const NEW_LEAD_STAGE_ID = 6;
 
 /**
- * Custom field KEYS.
+ * CUSTOM FIELD MAP
  *
- * Pipedrive identifies custom fields by a 40-char hash key, NOT by their
- * human-readable name. Fill these in from:
- *   Settings -> Company settings -> Data fields  (or the API /personFields
- *   and /dealFields endpoints).
- */
-const FIELD_KEYS = {
-  // TODO: INSERT the custom field key for "registros_publicos" here.
-  registros_publicos: '4eb07573750fc966bc856de7f8e5fdb926d691dd',
-
-  // Provided by you already:
-  ciudad_inmueble: 'fd91b8aa1f73a20634e912b3a41736a40478aa9c',
-};
-
-/**
- * ENUM option mappings.
+ * In this Pipedrive account the same questions exist as BOTH a Person field
+ * and a Deal field, and each version has its OWN 40-char key and its OWN set
+ * of numeric option IDs. Pipedrive "enum" fields require the numeric option
+ * ID, never the label text.
  *
- * Pipedrive "enum" (single-option) custom fields do NOT accept the label
- * text. They require the numeric OPTION ID. Map every possible incoming
- * label to its option ID here.
+ * Structure: fieldName -> { entity -> { key, options } }
+ *   - Writing to an entity is opt-in: if you don't want a field on the Person
+ *     (or Deal), delete that entity block.
+ *   - Option keys below are stored normalized (lowercase, no accents). Lookups
+ *     are accent/case-insensitive, so "Si"/"Sí" and "Huanuco"/"Huánuco" match.
+ *
+ * NOTE: the PERSON "ciudad_inmueble" field currently has only 3 options
+ * configured in Pipedrive (Amazonas, Áncash, Apurímac). Any other city cannot
+ * be stored on the Person until you add the missing options in Pipedrive and
+ * extend the map below. The DEAL version already has all 25 regions.
  */
-const registrosPublicosOptions = {
-  Si: 'Si',
-  No: 'No',
+const CUSTOM_FIELDS = {
+  registros_publicos: {
+    person: {
+      key: 'bd5402559c03380c0bae3b292555fcae222310cd',
+      options: { si: 32, no: 33 },
+    },
+    deal: {
+      key: '4eb07573750fc966bc856de7f8e5fdb926d691dd',
+      options: { si: 37, no: 38 },
+    },
+  },
+  ciudad_inmueble: {
+    person: {
+      key: '9f2ef74ec85fda3fa28a22b55da07edc2414f0bb',
+      options: {
+        amazonas: 34, ancash: 35, apurimac: 36, arequipa: 64, ayacucho: 65,
+        cajamarca: 66, callao: 67, cusco: 68, huancavelica: 69, huanuco: 70,
+        ica: 71, junin: 72, 'la libertad': 73, lambayeque: 74, lima: 75,
+        loreto: 76, 'madre de dios': 77, moquegua: 78, pasco: 79, piura: 80,
+        puno: 81, 'san martin': 82, tacna: 83, tumbes: 84, ucayali: 85,
+      },
+    },
+    deal: {
+      key: 'fd91b8aa1f73a20634e912b3a41736a40478aa9c',
+      options: {
+        amazonas: 39, ancash: 40, apurimac: 41, arequipa: 42, ayacucho: 43,
+        cajamarca: 44, callao: 45, cusco: 46, huancavelica: 47, huanuco: 48,
+        ica: 49, junin: 50, 'la libertad': 51, lambayeque: 52, lima: 53,
+        loreto: 54, 'madre de dios': 55, moquegua: 56, pasco: 57, piura: 58,
+        puno: 59, 'san martin': 60, tacna: 61, tumbes: 62, ucayali: 63,
+      },
+    },
+  },
 };
 
 /**
- * City -> option ID mapping. Add new cities here as you configure them in
- * Pipedrive. Replace each null with the real numeric option ID.
+ * The entity that MUST accept every enum value (source of truth). If a value
+ * cannot be mapped for this entity, the request fails with 400. Other entities
+ * are best-effort: unmapped values are simply skipped (and logged), so an
+ * incomplete Person field never blocks lead creation.
  */
-const ciudadOptions = {
-  // TODO: INSERT option IDs for each city.
-  "Amazonas": "Amazonas",
-  "Áncash": "Áncash",
-  "Apurímac": "Apurímac",
-  "Arequipa": "Arequipa",
-  "Ayacucho": "Ayacucho",
-  "Cajamarca": "Cajamarca",
-  "Callao": "Callao",
-  "Cusco": "Cusco",
-  "Huancavelica": "Huancavelica",
-  "Huánuco": "Huánuco",
-  "Ica": "Ica",
-  "Junín": "Junín",
-  "La Libertad": "La Libertad",
-  "Lambayeque": "Lambayeque",
-  "Lima": "Lima",
-  "Loreto": "Loreto",
-  "Madre de Dios": "Madre de Dios",
-  "Moquegua": "Moquegua",
-  "Pasco": "Pasco",
-  "Piura": "Piura",
-  "Puno": "Puno",
-  "San Martín": "San Martín",
-  "Tacna": "Tacna",
-  "Tumbes": "Tumbes",
-  "Ucayali": "Ucayali",
-};
-
-/**
- * Which entity each custom field belongs to.
- * Change "person" / "deal" here if you attach a field to the other entity.
- */
-const FIELD_TARGET = {
-  registros_publicos: 'deal',
-  ciudad_inmueble: 'deal',
-};
+const PRIMARY_ENTITY = 'deal';
 
 // Required fields expected from the frontend.
 const REQUIRED_FIELDS = [
@@ -107,6 +99,48 @@ function setCorsHeaders(res) {
 
 function sendJson(res, statusCode, payload) {
   res.status(statusCode).json(payload);
+}
+
+/**
+ * Normalize a label for lookup: strip diacritics, trim, lowercase.
+ * "Sí" -> "si", "Huánuco" -> "huanuco", "La Libertad" -> "la libertad".
+ */
+function normalizeLabel(value) {
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Resolve an incoming label to the numeric option ID for a given field/entity.
+ * Returns undefined when the value is not mapped for that entity.
+ */
+function resolveOptionId(fieldName, entity, value) {
+  const cfg = CUSTOM_FIELDS[fieldName]?.[entity];
+  if (!cfg) return undefined;
+  return cfg.options[normalizeLabel(value)];
+}
+
+/**
+ * Attach every configured custom field for one entity onto its payload.
+ * Best-effort: values that can't be mapped for this entity are skipped and
+ * returned as warnings (so a partially-configured field never breaks the flow).
+ */
+function attachCustomFields(payload, entity, values) {
+  const warnings = [];
+  for (const [fieldName, entityMap] of Object.entries(CUSTOM_FIELDS)) {
+    const cfg = entityMap[entity];
+    if (!cfg) continue;
+    const optionId = resolveOptionId(fieldName, entity, values[fieldName]);
+    if (optionId === undefined) {
+      warnings.push(`${entity}.${fieldName}="${values[fieldName]}" is not mapped; skipped`);
+      continue;
+    }
+    payload[cfg.key] = optionId;
+  }
+  return warnings;
 }
 
 /**
@@ -178,23 +212,16 @@ export default async function handler(req, res) {
     ciudad_inmueble,
   } = body;
 
-  // 2. Resolve enum labels -> option IDs.
-  const registrosOptionId = registrosPublicosOptions[registros_publicos];
-  if (registrosOptionId === undefined) {
-    return sendJson(res, 400, {
-      success: false,
-      message: `Invalid value for "registros_publicos": "${registros_publicos}". Allowed: ${Object.keys(
-        registrosPublicosOptions
-      ).join(', ')}.`,
-    });
-  }
-
-  const ciudadOptionId = ciudadOptions[ciudad_inmueble];
-  if (ciudadOptionId === undefined || ciudadOptionId === null) {
-    return sendJson(res, 400, {
-      success: false,
-      message: `Unmapped or missing option ID for "ciudad_inmueble": "${ciudad_inmueble}". Add it to ciudadOptions.`,
-    });
+  // 2. Validate enum values against the PRIMARY entity (source of truth).
+  const enumValues = { registros_publicos, ciudad_inmueble };
+  for (const fieldName of Object.keys(CUSTOM_FIELDS)) {
+    if (!CUSTOM_FIELDS[fieldName][PRIMARY_ENTITY]) continue;
+    if (resolveOptionId(fieldName, PRIMARY_ENTITY, enumValues[fieldName]) === undefined) {
+      return sendJson(res, 400, {
+        success: false,
+        message: `Invalid value for "${fieldName}": "${enumValues[fieldName]}". It is not a configured option.`,
+      });
+    }
   }
 
   const fullName = `${nombre} ${apellidos}`.trim();
@@ -215,12 +242,10 @@ export default async function handler(req, res) {
       phone: [{ value: whatsapp, primary: true }],
     };
 
-    // Attach person-scoped custom fields.
-    if (FIELD_TARGET.registros_publicos === 'person') {
-      personPayload[FIELD_KEYS.registros_publicos] = registrosOptionId;
-    }
-    if (FIELD_TARGET.ciudad_inmueble === 'person') {
-      personPayload[FIELD_KEYS.ciudad_inmueble] = ciudadOptionId;
+    // Attach person-scoped custom fields (best-effort per entity).
+    const personWarnings = attachCustomFields(personPayload, 'person', enumValues);
+    if (personWarnings.length) {
+      console.warn('Person custom-field warnings:', personWarnings);
     }
 
     const personRes = await pipedrive.post('/persons', personPayload);
@@ -240,12 +265,10 @@ export default async function handler(req, res) {
       stage_id: NEW_LEAD_STAGE_ID,
     };
 
-    // Attach deal-scoped custom fields.
-    if (FIELD_TARGET.registros_publicos === 'deal') {
-      dealPayload[FIELD_KEYS.registros_publicos] = registrosOptionId;
-    }
-    if (FIELD_TARGET.ciudad_inmueble === 'deal') {
-      dealPayload[FIELD_KEYS.ciudad_inmueble] = ciudadOptionId;
+    // Attach deal-scoped custom fields (best-effort per entity).
+    const dealWarnings = attachCustomFields(dealPayload, 'deal', enumValues);
+    if (dealWarnings.length) {
+      console.warn('Deal custom-field warnings:', dealWarnings);
     }
 
     const dealRes = await pipedrive.post('/deals', dealPayload);
