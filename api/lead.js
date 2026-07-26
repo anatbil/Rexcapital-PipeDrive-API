@@ -79,7 +79,7 @@ const ciudadOptions = {
  * Change "person" / "deal" here if you attach a field to the other entity.
  */
 const FIELD_TARGET = {
-  registros_publicos: 'person',
+  registros_publicos: 'deal',
   ciudad_inmueble: 'deal',
 };
 
