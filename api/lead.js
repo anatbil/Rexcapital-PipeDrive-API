@@ -23,10 +23,10 @@ const NEW_LEAD_STAGE_ID = 6;
  */
 const FIELD_KEYS = {
   // TODO: INSERT the custom field key for "registros_publicos" here.
-  registros_publicos: 'REGISTROS_PUBLICOS_FIELD_KEY',
+  registros_publicos: '4eb07573750fc966bc856de7f8e5fdb926d691dd',
 
   // Provided by you already:
-  ciudad_inmueble: 'fd91b8a1f73a20634e912b3a41736a40478aa9c',
+  ciudad_inmueble: 'fd91b8aa1f73a20634e912b3a41736a40478aa9c',
 };
 
 /**
@@ -37,8 +37,8 @@ const FIELD_KEYS = {
  * label to its option ID here.
  */
 const registrosPublicosOptions = {
-  Si: 37,
-  No: 38,
+  Si: 'Si',
+  No: 'No',
 };
 
 /**
@@ -47,8 +47,31 @@ const registrosPublicosOptions = {
  */
 const ciudadOptions = {
   // TODO: INSERT option IDs for each city.
-  Lima: null,
-  Arequipa: null,
+  "Amazonas": "Amazonas",
+  "Áncash": "Áncash",
+  "Apurímac": "Apurímac",
+  "Arequipa": "Arequipa",
+  "Ayacucho": "Ayacucho",
+  "Cajamarca": "Cajamarca",
+  "Callao": "Callao",
+  "Cusco": "Cusco",
+  "Huancavelica": "Huancavelica",
+  "Huánuco": "Huánuco",
+  "Ica": "Ica",
+  "Junín": "Junín",
+  "La Libertad": "La Libertad",
+  "Lambayeque": "Lambayeque",
+  "Lima": "Lima",
+  "Loreto": "Loreto",
+  "Madre de Dios": "Madre de Dios",
+  "Moquegua": "Moquegua",
+  "Pasco": "Pasco",
+  "Piura": "Piura",
+  "Puno": "Puno",
+  "San Martín": "San Martín",
+  "Tacna": "Tacna",
+  "Tumbes": "Tumbes",
+  "Ucayali": "Ucayali",
 };
 
 /**
