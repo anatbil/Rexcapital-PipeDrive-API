@@ -1,0 +1,172 @@
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
+/* Estilos aislados para no interferir con el diseño de tu web */
+.rex-form-wrapper {
+    font-family: 'Poppins', sans-serif;
+    max-width: 500px;
+    margin: 0 auto;
+    background: #ffffff;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    box-sizing: border-box;
+}
+.rex-form-wrapper h2 {
+    text-align: center;
+    color: #1a1a1a;
+    margin-bottom: 20px;
+    margin-top: 0;
+}
+.rex-form-wrapper .rex-form-group {
+    margin-bottom: 15px;
+    text-align: left;
+}
+.rex-form-wrapper label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #333;
+    font-size: 0.95em;
+}
+.rex-form-wrapper input[type="text"],
+.rex-form-wrapper input[type="email"],
+.rex-form-wrapper input[type="tel"],
+.rex-form-wrapper select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-size: 1em;
+    background-color: #fff;
+    color: #333;
+    font-family: 'Poppins', sans-serif;
+}
+.rex-form-wrapper button {
+    padding: 12px 20px;
+    background-color: #23a455;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    width: 100%;
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 10px;
+    font-family: 'Poppins', sans-serif;
+}
+.rex-form-wrapper button:hover {
+    background-color: #1a8243;
+}
+.rex-form-wrapper #mensaje {
+    margin-top: 15px;
+    text-align: center;
+    font-weight: 600;
+}
+</style>
+
+<div class="rex-form-wrapper">
+    <form id="lead-form">
+        <div class="rex-form-group">
+            <label for="nombre">Nombre:</label>
+            <input type="text" id="nombre" name="nombre" required>
+        </div>
+        <div class="rex-form-group">
+            <label for="apellidos">Apellidos:</label>
+            <input type="text" id="apellidos" name="apellidos" required>
+        </div>
+        <div class="rex-form-group">
+            <label for="whatsapp">WhatsApp (Celular):</label>
+            <input type="tel" id="whatsapp" name="whatsapp" required>
+        </div>
+        <div class="rex-form-group">
+            <label for="email">Correo electrónico:</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+        <div class="rex-form-group">
+            <label for="registros_publicos">¿Tienes una propiedad (inmueble) inscrita en Registros Públicos?</label>
+            <select id="registros_publicos" name="registros_publicos" required>
+                <option value="">Selecciona una opción</option>
+                <option value="Si">Sí</option>
+                <option value="No">No</option>
+            </select>
+        </div>
+        <div class="rex-form-group">
+            <label for="ciudad_inmueble">Ciudad donde está ubicado tu inmueble:</label>
+            <select id="ciudad_inmueble" name="ciudad_inmueble" required>
+                <option value="">Selecciona tu departamento</option>
+                <option value="Amazonas">Amazonas</option>
+                <option value="Áncash">Áncash</option>
+                <option value="Apurímac">Apurímac</option>
+                <option value="Arequipa">Arequipa</option>
+                <option value="Ayacucho">Ayacucho</option>
+                <option value="Cajamarca">Cajamarca</option>
+                <option value="Callao">Callao</option>
+                <option value="Cusco">Cusco</option>
+                <option value="Huancavelica">Huancavelica</option>
+                <option value="Huánuco">Huánuco</option>
+                <option value="Ica">Ica</option>
+                <option value="Junín">Junín</option>
+                <option value="La Libertad">La Libertad</option>
+                <option value="Lambayeque">Lambayeque</option>
+                <option value="Lima">Lima</option>
+                <option value="Loreto">Loreto</option>
+                <option value="Madre de Dios">Madre de Dios</option>
+                <option value="Moquegua">Moquegua</option>
+                <option value="Pasco">Pasco</option>
+                <option value="Piura">Piura</option>
+                <option value="Puno">Puno</option>
+                <option value="San Martín">San Martín</option>
+                <option value="Tacna">Tacna</option>
+                <option value="Tumbes">Tumbes</option>
+                <option value="Ucayali">Ucayali</option>
+            </select>
+        </div>
+        <button type="submit">Enviar Información</button>
+    </form>
+    <div id="mensaje"></div>
+</div>
+
+<script>
+document.getElementById('lead-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const webhookUrl = 'https://rexcapital-pipedrive-api.vercel.app/api/lead';
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData.entries());
+    const mensajeDiv = document.getElementById('mensaje');
+    
+    mensajeDiv.style.color = '#333';
+    mensajeDiv.innerText = 'Enviando...';
+    console.log(data);
+
+    fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    })
+    .then(response => response.json().then(result => ({ ok: response.ok, result })))
+    .then(({ ok, result }) => {
+        if (!ok || !result.success) {
+            throw new Error((result && result.message) || 'Error en el servidor');
+        }
+
+        mensajeDiv.style.color = '#23a455';
+        mensajeDiv.innerText = 'Procesando tu solicitud...';
+
+        // El backend decide la calificación (única fuente de verdad).
+        if (result.qualified) {
+            // RUTA A: Calificado
+            window.location.href = 'https://www.rexcapital.pe/felicitaciones-preaprobado/';
+        } else {
+            // RUTA B: No calificado
+            window.location.href = 'https://www.rexcapital.pe/no-calificas/';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        mensajeDiv.style.color = 'red';
+        mensajeDiv.innerText = 'Hubo un error al enviar. Intenta de nuevo más tarde.';
+    });
+});
+</script>

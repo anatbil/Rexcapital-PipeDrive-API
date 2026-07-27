@@ -75,6 +75,32 @@ const CUSTOM_FIELDS = {
  */
 const PRIMARY_ENTITY = 'deal';
 
+/**
+ * QUALIFICATION RULES
+ *
+ * A lead is only created in Pipedrive when it qualifies:
+ *   - registros_publicos must equal the required answer ("Si"), AND
+ *   - ciudad_inmueble must be one of the covered cities.
+ *
+ * Non-qualifying leads are NOT sent to the CRM; the API still responds 200 so
+ * the frontend can redirect the user to the right page. Matching is
+ * accent/case-insensitive (see normalizeLabel).
+ */
+const QUALIFICATION = {
+  requiredRegistrosPublicos: 'Si',
+  cities: ['Lima', 'Callao', 'Arequipa'],
+};
+
+function isQualified(registrosPublicos, ciudad) {
+  const registrosOk =
+    normalizeLabel(registrosPublicos) ===
+    normalizeLabel(QUALIFICATION.requiredRegistrosPublicos);
+  const cityOk = QUALIFICATION.cities
+    .map(normalizeLabel)
+    .includes(normalizeLabel(ciudad));
+  return registrosOk && cityOk;
+}
+
 // Required fields expected from the frontend.
 const REQUIRED_FIELDS = [
   'nombre',
@@ -212,7 +238,17 @@ export default async function handler(req, res) {
     ciudad_inmueble,
   } = body;
 
-  // 2. Validate enum values against the PRIMARY entity (source of truth).
+  // 2. Qualification gate. Non-qualifying leads never reach Pipedrive, but we
+  //    still return 200 so the frontend can redirect to the "no calificas"
+  //    page without treating it as an error.
+  if (!isQualified(registros_publicos, ciudad_inmueble)) {
+    return sendJson(res, 200, {
+      success: true,
+      qualified: false,
+    });
+  }
+
+  // 3. Validate enum values against the PRIMARY entity (source of truth).
   const enumValues = { registros_publicos, ciudad_inmueble };
   for (const fieldName of Object.keys(CUSTOM_FIELDS)) {
     if (!CUSTOM_FIELDS[fieldName][PRIMARY_ENTITY]) continue;
@@ -282,9 +318,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // 7. Clean success response.
+    // Clean success response.
     return sendJson(res, 200, {
       success: true,
+      qualified: true,
       personId,
       dealId,
     });
