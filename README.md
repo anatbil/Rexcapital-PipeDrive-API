@@ -144,22 +144,25 @@ curl -X POST http://localhost:3000/api/lead \
 }
 ```
 
-### Success response (non-qualified lead — NOT sent to Pipedrive)
+### Success response (non-qualified lead — Person saved, no Deal)
 
 ```json
 {
   "success": true,
-  "qualified": false
+  "qualified": false,
+  "personId": 124
 }
 ```
 
-> **Qualification gate:** a lead is only created in Pipedrive when
-> `registros_publicos === "Si"` **and** `ciudad_inmueble` is one of
-> `Lima`, `Callao`, `Arequipa` (configurable in the `QUALIFICATION` block of
-> `api/lead.js`). Non-qualifying leads still return `200` with
-> `"qualified": false` so the frontend can redirect to the "no calificas" page.
-> The frontend uses this `qualified` flag as the single source of truth for
-> redirects.
+> **Qualification gate:** *every* lead is stored in Pipedrive as a **Person**
+> (Contact), so the team can review everyone under **Contacts → People**. Only
+> **qualified** leads also get a **Deal**, which is what places them in the
+> pipeline/embudo. A lead qualifies when `registros_publicos === "Si"` **and**
+> `ciudad_inmueble` is one of `Lima`, `Callao`, `Arequipa` (configurable in the
+> `QUALIFICATION` block of `api/lead.js`). Non-qualifying leads return `200`
+> with `"qualified": false` (and their `personId`) so the frontend can redirect
+> to the "no calificas" page. The frontend uses this `qualified` flag as the
+> single source of truth for redirects.
 
 ### Error response
 

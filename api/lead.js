@@ -70,10 +70,12 @@ const CUSTOM_FIELDS = {
 /**
  * The entity that MUST accept every enum value (source of truth). If a value
  * cannot be mapped for this entity, the request fails with 400. Other entities
- * are best-effort: unmapped values are simply skipped (and logged), so an
- * incomplete Person field never blocks lead creation.
+ * are best-effort: unmapped values are simply skipped (and logged).
+ *
+ * This is "person" because EVERY lead (qualified or not) is stored as a Person,
+ * so the Person field maps must cover all form values.
  */
-const PRIMARY_ENTITY = 'deal';
+const PRIMARY_ENTITY = 'person';
 
 /**
  * QUALIFICATION RULES
@@ -238,15 +240,11 @@ export default async function handler(req, res) {
     ciudad_inmueble,
   } = body;
 
-  // 2. Qualification gate. Non-qualifying leads never reach Pipedrive, but we
-  //    still return 200 so the frontend can redirect to the "no calificas"
-  //    page without treating it as an error.
-  if (!isQualified(registros_publicos, ciudad_inmueble)) {
-    return sendJson(res, 200, {
-      success: true,
-      qualified: false,
-    });
-  }
+  // 2. Determine qualification. ALL leads are stored in Pipedrive as a Person
+  //    (so the client can see everyone, like HighLevel keeps the contact), but
+  //    only qualified leads also get a Deal — that's what puts them in the
+  //    pipeline/embudo. Non-qualified leads => Person only, no Deal.
+  const qualified = isQualified(registros_publicos, ciudad_inmueble);
 
   // 3. Validate enum values against the PRIMARY entity (source of truth).
   const enumValues = { registros_publicos, ciudad_inmueble };
@@ -294,7 +292,18 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4. Build and create the Deal.
+    // 4. Only QUALIFIED leads get a Deal (this is what places them in the
+    //    pipeline/embudo). Non-qualified leads stop here: their Person is
+    //    saved, but they never enter the funnel.
+    if (!qualified) {
+      return sendJson(res, 200, {
+        success: true,
+        qualified: false,
+        personId,
+      });
+    }
+
+    // Build and create the Deal.
     const dealPayload = {
       title: `Lead - ${fullName}`,
       person_id: personId,
