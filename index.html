@@ -1,3 +1,9 @@
+<!--
+  Rexcapital lead form → backend /api/lead → Monday CRM
+  - Always creates a Contacto
+  - Qualified (Sí + Lima/Callao/Arequipa) also creates an Acuerdo in "Leads nuevos"
+  - Redirect uses backend "qualified" flag
+-->
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
 /* Estilos aislados para no interferir con el diseño de tu web */
@@ -130,23 +136,37 @@
 <script>
 document.getElementById('lead-form').addEventListener('submit', function(e) {
     e.preventDefault();
-    
-    const webhookUrl = 'https://rexcapital-pipedrive-api.vercel.app/api/lead';
-    const formData = new FormData(this);
+
+    // Your Vercel backend (writes to Monday CRM — token stays server-side).
+    const apiUrl = 'https://rexcapital-pipedrive-api.vercel.app/api/lead';
+
+    const form = this;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const formData = new FormData(form);
     const data = Object.fromEntries(formData.entries());
     const mensajeDiv = document.getElementById('mensaje');
-    
+
     mensajeDiv.style.color = '#333';
     mensajeDiv.innerText = 'Enviando...';
-    console.log(data);
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Enviando...';
+    }
 
-    fetch(webhookUrl, {
+    fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     })
-    .then(response => response.json().then(result => ({ ok: response.ok, result })))
-    .then(({ ok, result }) => {
+    .then(function(response) {
+        return response.json().then(function(result) {
+            return { ok: response.ok, result: result };
+        });
+    })
+    .then(function(payload) {
+        var ok = payload.ok;
+        var result = payload.result;
+
         if (!ok || !result.success) {
             throw new Error((result && result.message) || 'Error en el servidor');
         }
@@ -154,19 +174,23 @@ document.getElementById('lead-form').addEventListener('submit', function(e) {
         mensajeDiv.style.color = '#23a455';
         mensajeDiv.innerText = 'Procesando tu solicitud...';
 
-        // El backend decide la calificación (única fuente de verdad).
+        // Backend (Monday) decides qualification — single source of truth.
+        // qualified: true  → Acuerdo created in pipeline ("Leads nuevos")
+        // qualified: false → Contacto saved only (not in embudo)
         if (result.qualified) {
-            // RUTA A: Calificado
             window.location.href = 'https://www.rexcapital.pe/felicitaciones-preaprobado/';
         } else {
-            // RUTA B: No calificado
             window.location.href = 'https://www.rexcapital.pe/no-calificas/';
         }
     })
-    .catch(error => {
+    .catch(function(error) {
         console.error('Error:', error);
         mensajeDiv.style.color = 'red';
         mensajeDiv.innerText = 'Hubo un error al enviar. Intenta de nuevo más tarde.';
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerText = 'Enviar Información';
+        }
     });
 });
 </script>

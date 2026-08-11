@@ -3,107 +3,73 @@ import axios from 'axios';
 /* -------------------------------------------------------------------------- */
 /*  CONFIGURATION LAYER                                                        */
 /*                                                                            */
-/*  Everything you may need to update over time lives in this block so you    */
-/*  never have to touch the request logic below.                              */
+/*  Fill in board/column/group IDs from Monday (API playground or Developer   */
+/*  mode). Secrets come from environment variables — never hardcode tokens.   */
 /* -------------------------------------------------------------------------- */
 
-// Base URL for the Pipedrive REST API (v1).
-const PIPEDRIVE_BASE_URL = 'https://api.pipedrive.com/v1';
-
-// Deal stage where new leads land. "Nuevos leads" = 6.
-const NEW_LEAD_STAGE_ID = 6;
+// Monday GraphQL API (single endpoint for all operations).
+const MONDAY_API_URL = 'https://api.monday.com/v2';
 
 /**
- * CUSTOM FIELD MAP
+ * Board / group IDs.
  *
- * In this Pipedrive account the same questions exist as BOTH a Person field
- * and a Deal field, and each version has its OWN 40-char key and its OWN set
- * of numeric option IDs. Pipedrive "enum" fields require the numeric option
- * ID, never the label text.
- *
- * Structure: fieldName -> { entity -> { key, options } }
- *   - Writing to an entity is opt-in: if you don't want a field on the Person
- *     (or Deal), delete that entity block.
- *   - Option keys below are stored normalized (lowercase, no accents). Lookups
- *     are accent/case-insensitive, so "Si"/"Sí" and "Huanuco"/"Huánuco" match.
- *
- * NOTE: the PERSON "ciudad_inmueble" field currently has only 3 options
- * configured in Pipedrive (Amazonas, Áncash, Apurímac). Any other city cannot
- * be stored on the Person until you add the missing options in Pipedrive and
- * extend the map below. The DEAL version already has all 25 regions.
+ * Board ID: open the board URL → /boards/XXXXXXXX
+ * Group ID: API playground → boards { groups { id title } }
+ *           "Leads nuevos" is the pipeline stage for new qualified deals.
  */
-const CUSTOM_FIELDS = {
-  registros_publicos: {
-    person: {
-      key: 'bd5402559c03380c0bae3b292555fcae222310cd',
-      options: { si: 32, no: 33 },
-    },
-    deal: {
-      key: '4eb07573750fc966bc856de7f8e5fdb926d691dd',
-      options: { si: 37, no: 38 },
-    },
+const BOARDS = {
+  // TODO: paste Contactos board ID
+  contactos: process.env.MONDAY_CONTACTOS_BOARD_ID || 'CONTACTOS_BOARD_ID',
+  // TODO: paste Acuerdos board ID
+  acuerdos: process.env.MONDAY_ACUERDOS_BOARD_ID || 'ACUERDOS_BOARD_ID',
+};
+
+const GROUPS = {
+  // TODO: paste the group id for "Leads nuevos" on the Acuerdos board
+  leadsNuevos: process.env.MONDAY_LEADS_NUEVOS_GROUP_ID || 'LEADS_NUEVOS_GROUP_ID',
+};
+
+/**
+ * Column IDs on each board.
+ *
+ * Dropdown/status columns in Monday accept LABEL TEXT (not Pipedrive option IDs).
+ * Get IDs via:
+ *   query { boards(ids:[BOARD_ID]) { columns { id title type } } }
+ */
+const COLUMNS = {
+  contactos: {
+    // TODO: email / phone column ids on Contactos (often email / phone / contact_email)
+    email: process.env.MONDAY_CONTACTOS_EMAIL_COLUMN || 'email',
+    phone: process.env.MONDAY_CONTACTOS_PHONE_COLUMN || 'phone',
+    // Optional: same custom fields on contacts if you created them there
+    ubicacionInmueble: process.env.MONDAY_CONTACTOS_UBICACION_COLUMN || null,
+    estadoRegistral: process.env.MONDAY_CONTACTOS_ESTADO_COLUMN || null,
   },
-  ciudad_inmueble: {
-    person: {
-      key: '9f2ef74ec85fda3fa28a22b55da07edc2414f0bb',
-      options: {
-        amazonas: 34, ancash: 35, apurimac: 36, arequipa: 64, ayacucho: 65,
-        cajamarca: 66, callao: 67, cusco: 68, huancavelica: 69, huanuco: 70,
-        ica: 71, junin: 72, 'la libertad': 73, lambayeque: 74, lima: 75,
-        loreto: 76, 'madre de dios': 77, moquegua: 78, pasco: 79, piura: 80,
-        puno: 81, 'san martin': 82, tacna: 83, tumbes: 84, ucayali: 85,
-      },
-    },
-    deal: {
-      key: 'fd91b8aa1f73a20634e912b3a41736a40478aa9c',
-      options: {
-        amazonas: 39, ancash: 40, apurimac: 41, arequipa: 42, ayacucho: 43,
-        cajamarca: 44, callao: 45, cusco: 46, huancavelica: 47, huanuco: 48,
-        ica: 49, junin: 50, 'la libertad': 51, lambayeque: 52, lima: 53,
-        loreto: 54, 'madre de dios': 55, moquegua: 56, pasco: 57, piura: 58,
-        puno: 59, 'san martin': 60, tacna: 61, tumbes: 62, ucayali: 63,
-      },
-    },
+  acuerdos: {
+    // TODO: paste your 3 custom column IDs from Acuerdos
+    ubicacionInmueble:
+      process.env.MONDAY_ACUERDOS_UBICACION_COLUMN || 'UBICACION_COLUMN_ID',
+    estadoRegistral:
+      process.env.MONDAY_ACUERDOS_ESTADO_COLUMN || 'ESTADO_COLUMN_ID',
+    // Optional — only set if the form later sends "monto_solicitado"
+    montoSolicitado: process.env.MONDAY_ACUERDOS_MONTO_COLUMN || null,
+    // Optional — board relation / connect column linking deal → contact
+    contactRelation: process.env.MONDAY_ACUERDOS_CONTACT_COLUMN || null,
   },
 };
 
 /**
- * The entity that MUST accept every enum value (source of truth). If a value
- * cannot be mapped for this entity, the request fails with 400. Other entities
- * are best-effort: unmapped values are simply skipped (and logged).
+ * QUALIFICATION RULES (same as before / HighLevel behavior)
  *
- * This is "person" because EVERY lead (qualified or not) is stored as a Person,
- * so the Person field maps must cover all form values.
- */
-const PRIMARY_ENTITY = 'person';
-
-/**
- * QUALIFICATION RULES
- *
- * A lead is only created in Pipedrive when it qualifies:
- *   - registros_publicos must equal the required answer ("Si"), AND
- *   - ciudad_inmueble must be one of the covered cities.
- *
- * Non-qualifying leads are NOT sent to the CRM; the API still responds 200 so
- * the frontend can redirect the user to the right page. Matching is
- * accent/case-insensitive (see normalizeLabel).
+ * ALL leads → create Contact (Contactos board). Visible under Contactos.
+ * ONLY qualified → also create Deal (Acuerdos) in "Leads nuevos" group
+ *                 (this is what appears in the pipeline/embudo).
  */
 const QUALIFICATION = {
   requiredRegistrosPublicos: 'Si',
   cities: ['Lima', 'Callao', 'Arequipa'],
 };
 
-function isQualified(registrosPublicos, ciudad) {
-  const registrosOk =
-    normalizeLabel(registrosPublicos) ===
-    normalizeLabel(QUALIFICATION.requiredRegistrosPublicos);
-  const cityOk = QUALIFICATION.cities
-    .map(normalizeLabel)
-    .includes(normalizeLabel(ciudad));
-  return registrosOk && cityOk;
-}
-
-// Required fields expected from the frontend.
 const REQUIRED_FIELDS = [
   'nombre',
   'apellidos',
@@ -118,8 +84,6 @@ const REQUIRED_FIELDS = [
 /* -------------------------------------------------------------------------- */
 
 function setCorsHeaders(res) {
-  // Frontend is hosted separately, so we allow cross-origin requests.
-  // Tighten "*" to your specific domain in production if you prefer.
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -129,10 +93,6 @@ function sendJson(res, statusCode, payload) {
   res.status(statusCode).json(payload);
 }
 
-/**
- * Normalize a label for lookup: strip diacritics, trim, lowercase.
- * "Sí" -> "si", "Huánuco" -> "huanuco", "La Libertad" -> "la libertad".
- */
 function normalizeLabel(value) {
   return String(value)
     .normalize('NFD')
@@ -141,40 +101,16 @@ function normalizeLabel(value) {
     .toLowerCase();
 }
 
-/**
- * Resolve an incoming label to the numeric option ID for a given field/entity.
- * Returns undefined when the value is not mapped for that entity.
- */
-function resolveOptionId(fieldName, entity, value) {
-  const cfg = CUSTOM_FIELDS[fieldName]?.[entity];
-  if (!cfg) return undefined;
-  return cfg.options[normalizeLabel(value)];
+function isQualified(registrosPublicos, ciudad) {
+  const registrosOk =
+    normalizeLabel(registrosPublicos) ===
+    normalizeLabel(QUALIFICATION.requiredRegistrosPublicos);
+  const cityOk = QUALIFICATION.cities
+    .map(normalizeLabel)
+    .includes(normalizeLabel(ciudad));
+  return registrosOk && cityOk;
 }
 
-/**
- * Attach every configured custom field for one entity onto its payload.
- * Best-effort: values that can't be mapped for this entity are skipped and
- * returned as warnings (so a partially-configured field never breaks the flow).
- */
-function attachCustomFields(payload, entity, values) {
-  const warnings = [];
-  for (const [fieldName, entityMap] of Object.entries(CUSTOM_FIELDS)) {
-    const cfg = entityMap[entity];
-    if (!cfg) continue;
-    const optionId = resolveOptionId(fieldName, entity, values[fieldName]);
-    if (optionId === undefined) {
-      warnings.push(`${entity}.${fieldName}="${values[fieldName]}" is not mapped; skipped`);
-      continue;
-    }
-    payload[cfg.key] = optionId;
-  }
-  return warnings;
-}
-
-/**
- * Some serverless setups deliver the body as a raw string. Normalize it to
- * an object so validation works regardless of how it arrives.
- */
 function parseBody(body) {
   if (!body) return {};
   if (typeof body === 'string') {
@@ -187,6 +123,143 @@ function parseBody(body) {
   return body;
 }
 
+/**
+ * Normalize "Si"/"Sí"/"No" for Monday dropdown/status labels.
+ * Prefer exact labels that match what you configured in Monday.
+ */
+function normalizeRegistrosLabel(value) {
+  const n = normalizeLabel(value);
+  if (n === 'si') return 'Si';
+  if (n === 'no') return 'No';
+  return String(value).trim();
+}
+
+/**
+ * Build Monday column_values object for dropdown / email / phone / numbers.
+ * Dropdown columns use { labels: ["Lima"] }.
+ * Status columns use { label: "Si" } — if a column is status, switch the helper.
+ */
+function buildColumnValues({
+  email,
+  phone,
+  ciudad,
+  registros,
+  monto,
+  contactItemId,
+  columns,
+  columnTypes = {},
+}) {
+  const values = {};
+
+  if (columns.email && email) {
+    values[columns.email] = {
+      email,
+      text: email,
+    };
+  }
+
+  if (columns.phone && phone) {
+    values[columns.phone] = {
+      phone: String(phone),
+      countryShortName: 'PE',
+    };
+  }
+
+  if (columns.ubicacionInmueble && ciudad) {
+    const type = columnTypes.ubicacionInmueble || 'dropdown';
+    values[columns.ubicacionInmueble] =
+      type === 'status' ? { label: ciudad } : { labels: [ciudad] };
+  }
+
+  if (columns.estadoRegistral && registros) {
+    const label = normalizeRegistrosLabel(registros);
+    const type = columnTypes.estadoRegistral || 'dropdown';
+    values[columns.estadoRegistral] =
+      type === 'status' ? { label } : { labels: [label] };
+  }
+
+  if (columns.montoSolicitado && monto !== undefined && monto !== null && monto !== '') {
+    values[columns.montoSolicitado] = String(monto);
+  }
+
+  if (columns.contactRelation && contactItemId) {
+    values[columns.contactRelation] = {
+      item_ids: [Number(contactItemId)],
+    };
+  }
+
+  return values;
+}
+
+async function mondayRequest(token, query, variables = {}) {
+  const response = await axios.post(
+    MONDAY_API_URL,
+    { query, variables },
+    {
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json',
+        'API-Version': '2024-10',
+      },
+      timeout: 15000,
+    }
+  );
+
+  // Monday returns GraphQL errors with HTTP 200 — surface them as failures.
+  if (response.data?.errors?.length) {
+    const message = response.data.errors.map((e) => e.message).join('; ');
+    const err = new Error(message);
+    err.mondayErrors = response.data.errors;
+    err.status = 502;
+    throw err;
+  }
+
+  return response.data?.data;
+}
+
+async function createMondayItem({
+  token,
+  boardId,
+  groupId,
+  itemName,
+  columnValues,
+}) {
+  // group_id is only used for deals entering a pipeline stage ("Leads nuevos").
+  const mutation = groupId
+    ? `
+      mutation ($boardId: ID!, $groupId: String!, $itemName: String!, $columnValues: JSON!) {
+        create_item(
+          board_id: $boardId,
+          group_id: $groupId,
+          item_name: $itemName,
+          column_values: $columnValues
+        ) { id }
+      }
+    `
+    : `
+      mutation ($boardId: ID!, $itemName: String!, $columnValues: JSON!) {
+        create_item(
+          board_id: $boardId,
+          item_name: $itemName,
+          column_values: $columnValues
+        ) { id }
+      }
+    `;
+
+  const variables = {
+    boardId: String(boardId),
+    itemName,
+    columnValues: JSON.stringify(columnValues),
+  };
+
+  if (groupId) {
+    variables.groupId = String(groupId);
+  }
+
+  const data = await mondayRequest(token, mutation, variables);
+  return data?.create_item?.id;
+}
+
 /* -------------------------------------------------------------------------- */
 /*  HANDLER                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -194,12 +267,10 @@ function parseBody(body) {
 export default async function handler(req, res) {
   setCorsHeaders(res);
 
-  // Answer CORS preflight requests.
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
-  // Only POST is accepted for creating leads.
   if (req.method !== 'POST') {
     return sendJson(res, 405, {
       success: false,
@@ -207,18 +278,16 @@ export default async function handler(req, res) {
     });
   }
 
-  // The token must exist server-side. We never expose it to the client.
-  const token = process.env.PIPEDRIVE_TOKEN;
+  const token = process.env.MONDAY_API_TOKEN;
   if (!token) {
     return sendJson(res, 500, {
       success: false,
-      message: 'Server misconfiguration: missing Pipedrive credentials.',
+      message: 'Server misconfiguration: missing Monday credentials.',
     });
   }
 
   const body = parseBody(req.body);
 
-  // 1. Validate required fields.
   const missing = REQUIRED_FIELDS.filter((field) => {
     const value = body[field];
     return value === undefined || value === null || String(value).trim() === '';
@@ -238,120 +307,93 @@ export default async function handler(req, res) {
     email,
     registros_publicos,
     ciudad_inmueble,
+    monto_solicitado,
   } = body;
 
-  // 2. Determine qualification. ALL leads are stored in Pipedrive as a Person
-  //    (so the client can see everyone, like HighLevel keeps the contact), but
-  //    only qualified leads also get a Deal — that's what puts them in the
-  //    pipeline/embudo. Non-qualified leads => Person only, no Deal.
   const qualified = isQualified(registros_publicos, ciudad_inmueble);
-
-  // 3. Validate enum values against the PRIMARY entity (source of truth).
-  const enumValues = { registros_publicos, ciudad_inmueble };
-  for (const fieldName of Object.keys(CUSTOM_FIELDS)) {
-    if (!CUSTOM_FIELDS[fieldName][PRIMARY_ENTITY]) continue;
-    if (resolveOptionId(fieldName, PRIMARY_ENTITY, enumValues[fieldName]) === undefined) {
-      return sendJson(res, 400, {
-        success: false,
-        message: `Invalid value for "${fieldName}": "${enumValues[fieldName]}". It is not a configured option.`,
-      });
-    }
-  }
-
   const fullName = `${nombre} ${apellidos}`.trim();
 
-  // Axios client preconfigured with base URL and the token query param.
-  const pipedrive = axios.create({
-    baseURL: PIPEDRIVE_BASE_URL,
-    params: { api_token: token },
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 15000,
-  });
-
   try {
-    // 3. Build and create the Person.
-    const personPayload = {
-      name: fullName,
-      email: [{ value: email, primary: true }],
-      phone: [{ value: whatsapp, primary: true }],
-    };
+    // 1. ALWAYS create a Contact (Contactos) — qualified or not.
+    const contactColumns = buildColumnValues({
+      email,
+      phone: whatsapp,
+      ciudad: ciudad_inmueble,
+      registros: registros_publicos,
+      columns: COLUMNS.contactos,
+    });
 
-    // Attach person-scoped custom fields (best-effort per entity).
-    const personWarnings = attachCustomFields(personPayload, 'person', enumValues);
-    if (personWarnings.length) {
-      console.warn('Person custom-field warnings:', personWarnings);
-    }
+    const contactId = await createMondayItem({
+      token,
+      boardId: BOARDS.contactos,
+      itemName: fullName,
+      columnValues: contactColumns,
+    });
 
-    const personRes = await pipedrive.post('/persons', personPayload);
-    const personId = personRes.data?.data?.id;
-
-    if (!personId) {
+    if (!contactId) {
       return sendJson(res, 502, {
         success: false,
-        message: 'Pipedrive did not return a person ID.',
+        message: 'Monday did not return a contact item ID.',
       });
     }
 
-    // 4. Only QUALIFIED leads get a Deal (this is what places them in the
-    //    pipeline/embudo). Non-qualified leads stop here: their Person is
-    //    saved, but they never enter the funnel.
+    // 2. Non-qualified: saved on Contactos only — do NOT enter Acuerdos pipeline.
     if (!qualified) {
       return sendJson(res, 200, {
         success: true,
         qualified: false,
-        personId,
+        contactId,
       });
     }
 
-    // Build and create the Deal.
-    const dealPayload = {
-      title: `Lead - ${fullName}`,
-      person_id: personId,
-      stage_id: NEW_LEAD_STAGE_ID,
-    };
+    // 3. Qualified: also create Deal on Acuerdos in "Leads nuevos".
+    const dealColumns = buildColumnValues({
+      ciudad: ciudad_inmueble,
+      registros: registros_publicos,
+      monto: monto_solicitado,
+      contactItemId: contactId,
+      columns: COLUMNS.acuerdos,
+    });
 
-    // Attach deal-scoped custom fields (best-effort per entity).
-    const dealWarnings = attachCustomFields(dealPayload, 'deal', enumValues);
-    if (dealWarnings.length) {
-      console.warn('Deal custom-field warnings:', dealWarnings);
-    }
-
-    const dealRes = await pipedrive.post('/deals', dealPayload);
-    const dealId = dealRes.data?.data?.id;
+    const dealId = await createMondayItem({
+      token,
+      boardId: BOARDS.acuerdos,
+      groupId: GROUPS.leadsNuevos,
+      itemName: `Lead - ${fullName}`,
+      columnValues: dealColumns,
+    });
 
     if (!dealId) {
       return sendJson(res, 502, {
         success: false,
-        message: 'Person created but Pipedrive did not return a deal ID.',
-        personId,
+        message: 'Contact created but Monday did not return a deal item ID.',
+        contactId,
       });
     }
 
-    // Clean success response.
     return sendJson(res, 200, {
       success: true,
       qualified: true,
-      personId,
+      contactId,
       dealId,
     });
   } catch (error) {
-    // 8. Error handling. Surface useful Pipedrive info without leaking secrets.
-    const status = error.response?.status || 500;
-    const pipedriveMessage =
-      error.response?.data?.error ||
-      error.response?.data?.error_info ||
+    const status = error.response?.status || error.status || 500;
+    const mondayMessage =
+      error.mondayErrors?.map((e) => e.message).join('; ') ||
+      error.response?.data?.errors?.map((e) => e.message).join('; ') ||
+      error.response?.data?.error_message ||
       error.message ||
-      'Unknown error contacting Pipedrive.';
+      'Unknown error contacting Monday.';
 
-    // Never log or return the token or full env. Log only safe context.
-    console.error('Pipedrive request failed:', {
+    console.error('Monday request failed:', {
       status,
-      message: pipedriveMessage,
+      message: mondayMessage,
     });
 
     return sendJson(res, status >= 400 && status < 600 ? status : 500, {
       success: false,
-      message: `Pipedrive error: ${pipedriveMessage}`,
+      message: `Monday error: ${mondayMessage}`,
     });
   }
 }

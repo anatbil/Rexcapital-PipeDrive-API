@@ -1,7 +1,7 @@
 {
   "name": "rexcapital-pipedrive-api",
   "version": "1.0.0",
-  "description": "Serverless backend that receives landing-page form submissions and creates a Person and Deal in Pipedrive CRM.",
+  "description": "Serverless backend that receives landing-page form submissions and creates Contactos/Acuerdos items in Monday CRM.",
   "type": "module",
   "private": true,
   "scripts": {
