@@ -139,9 +139,11 @@ function normalizeRegistrosLabel(value) {
 }
 
 /**
- * Build Monday column_values object for dropdown / email / phone / numbers.
- * Dropdown columns use { labels: ["Lima"] }.
- * Status columns use { label: "Si" } — if a column is status, switch the helper.
+ * Build Monday column_values for email / phone / status / dropdown / relation.
+ *
+ * Important: Monday column IDs starting with "color_" are STATUS columns.
+ * Status  → { label: "Lima" }
+ * Dropdown → { labels: ["Lima"] }
  */
 function buildColumnValues({
   email,
@@ -169,16 +171,20 @@ function buildColumnValues({
   }
 
   if (columns.ciudadInmueble && ciudad) {
-    const type = columnTypes.ciudadInmueble || 'dropdown';
-    values[columns.ciudadInmueble] =
-      type === 'status' ? { label: ciudad } : { labels: [ciudad] };
+    values[columns.ciudadInmueble] = formatSelectColumnValue(
+      columns.ciudadInmueble,
+      ciudad,
+      columnTypes.ciudadInmueble
+    );
   }
 
   if (columns.registrosPublicos && registros) {
     const label = normalizeRegistrosLabel(registros);
-    const type = columnTypes.registrosPublicos || 'dropdown';
-    values[columns.registrosPublicos] =
-      type === 'status' ? { label } : { labels: [label] };
+    values[columns.registrosPublicos] = formatSelectColumnValue(
+      columns.registrosPublicos,
+      label,
+      columnTypes.registrosPublicos
+    );
   }
 
   if (columns.contactRelation && contactItemId) {
@@ -188,6 +194,31 @@ function buildColumnValues({
   }
 
   return values;
+}
+
+/**
+ * Infer column type from the Monday column id when not explicitly provided.
+ * "color_*" => status, "dropdown_*" => dropdown.
+ */
+function resolveSelectType(columnId, explicitType) {
+  if (explicitType) return explicitType;
+  const id = String(columnId || '');
+  if (id.startsWith('color_') || id === 'status' || id.startsWith('status')) {
+    return 'status';
+  }
+  if (id.startsWith('dropdown_')) {
+    return 'dropdown';
+  }
+  // Default to status — common for Monday CRM custom "label" fields.
+  return 'status';
+}
+
+function formatSelectColumnValue(columnId, label, explicitType) {
+  const type = resolveSelectType(columnId, explicitType);
+  if (type === 'dropdown') {
+    return { labels: [label] };
+  }
+  return { label };
 }
 
 async function mondayRequest(token, query, variables = {}) {
@@ -223,7 +254,9 @@ async function createMondayItem({
   itemName,
   columnValues,
 }) {
-  // group_id is only used for deals entering a pipeline stage ("Leads nuevos").
+  // group_id is only used for deals entering the active group.
+  // create_labels_if_missing: true so status labels that match the form
+  // (e.g. city names) are created if they don't exist yet on the board.
   const mutation = groupId
     ? `
       mutation ($boardId: ID!, $groupId: String!, $itemName: String!, $columnValues: JSON!) {
@@ -231,7 +264,8 @@ async function createMondayItem({
           board_id: $boardId,
           group_id: $groupId,
           item_name: $itemName,
-          column_values: $columnValues
+          column_values: $columnValues,
+          create_labels_if_missing: true
         ) { id }
       }
     `
@@ -240,7 +274,8 @@ async function createMondayItem({
         create_item(
           board_id: $boardId,
           item_name: $itemName,
-          column_values: $columnValues
+          column_values: $columnValues,
+          create_labels_if_missing: true
         ) { id }
       }
     `;
