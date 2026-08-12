@@ -25,35 +25,39 @@ const BOARDS = {
 };
 
 const GROUPS = {
-  // TODO: paste the group id for "Leads nuevos" on the Acuerdos board
-  leadsNuevos: process.env.MONDAY_LEADS_NUEVOS_GROUP_ID || 'LEADS_NUEVOS_GROUP_ID',
+  // Main table group for active deals ("Acuerdos activos" → id is usually "topics").
+  // Pipeline stages like "Leads nuevos" are a Status column, not this group id.
+  acuerdosActivos: process.env.MONDAY_ACUERDOS_ACTIVOS_GROUP_ID || 'topics',
 };
 
 /**
  * Column IDs on each board.
  *
  * Dropdown/status columns in Monday accept LABEL TEXT (not Pipedrive option IDs).
- * Get IDs via:
- *   query { boards(ids:[BOARD_ID]) { columns { id title type } } }
+ * Get IDs via API playground:
+ *   query {
+ *     boards(ids: [18424940103]) {
+ *       columns { id title type }
+ *     }
+ *   }
+ * Match title "ciudad_inmueble" / "registros_publicos" → copy each "id".
  */
 const COLUMNS = {
   contactos: {
-    // TODO: email / phone column ids on Contactos (often email / phone / contact_email)
+    // Email / phone on Contactos (often "email" / "phone" / "contact_email")
     email: process.env.MONDAY_CONTACTOS_EMAIL_COLUMN || 'email',
     phone: process.env.MONDAY_CONTACTOS_PHONE_COLUMN || 'phone',
-    // Optional: same custom fields on contacts if you created them there
-    ubicacionInmueble: process.env.MONDAY_CONTACTOS_UBICACION_COLUMN || null,
-    estadoRegistral: process.env.MONDAY_CONTACTOS_ESTADO_COLUMN || null,
+    // Optional — only if you also created these columns on Contactos
+    ciudadInmueble: process.env.MONDAY_CONTACTOS_CIUDAD_INMUEBLE_COLUMN || null,
+    registrosPublicos: process.env.MONDAY_CONTACTOS_REGISTROS_PUBLICOS_COLUMN || null,
   },
   acuerdos: {
-    // TODO: paste your 3 custom column IDs from Acuerdos
-    ubicacionInmueble:
-      process.env.MONDAY_ACUERDOS_UBICACION_COLUMN || 'UBICACION_COLUMN_ID',
-    estadoRegistral:
-      process.env.MONDAY_ACUERDOS_ESTADO_COLUMN || 'ESTADO_COLUMN_ID',
-    // Optional — only set if the form later sends "monto_solicitado"
-    montoSolicitado: process.env.MONDAY_ACUERDOS_MONTO_COLUMN || null,
-    // Optional — board relation / connect column linking deal → contact
+    // Required custom fields on Acuerdos (same names as Pipedrive / form)
+    ciudadInmueble:
+      process.env.MONDAY_ACUERDOS_CIUDAD_INMUEBLE_COLUMN || 'CIUDAD_INMUEBLE_COLUMN_ID',
+    registrosPublicos:
+      process.env.MONDAY_ACUERDOS_REGISTROS_PUBLICOS_COLUMN || 'REGISTROS_PUBLICOS_COLUMN_ID',
+    // Optional — board relation / connect column linking Acuerdos → Contactos
     contactRelation: process.env.MONDAY_ACUERDOS_CONTACT_COLUMN || null,
   },
 };
@@ -144,7 +148,6 @@ function buildColumnValues({
   phone,
   ciudad,
   registros,
-  monto,
   contactItemId,
   columns,
   columnTypes = {},
@@ -165,21 +168,17 @@ function buildColumnValues({
     };
   }
 
-  if (columns.ubicacionInmueble && ciudad) {
-    const type = columnTypes.ubicacionInmueble || 'dropdown';
-    values[columns.ubicacionInmueble] =
+  if (columns.ciudadInmueble && ciudad) {
+    const type = columnTypes.ciudadInmueble || 'dropdown';
+    values[columns.ciudadInmueble] =
       type === 'status' ? { label: ciudad } : { labels: [ciudad] };
   }
 
-  if (columns.estadoRegistral && registros) {
+  if (columns.registrosPublicos && registros) {
     const label = normalizeRegistrosLabel(registros);
-    const type = columnTypes.estadoRegistral || 'dropdown';
-    values[columns.estadoRegistral] =
+    const type = columnTypes.registrosPublicos || 'dropdown';
+    values[columns.registrosPublicos] =
       type === 'status' ? { label } : { labels: [label] };
-  }
-
-  if (columns.montoSolicitado && monto !== undefined && monto !== null && monto !== '') {
-    values[columns.montoSolicitado] = String(monto);
   }
 
   if (columns.contactRelation && contactItemId) {
@@ -307,7 +306,6 @@ export default async function handler(req, res) {
     email,
     registros_publicos,
     ciudad_inmueble,
-    monto_solicitado,
   } = body;
 
   const qualified = isQualified(registros_publicos, ciudad_inmueble);
@@ -350,7 +348,6 @@ export default async function handler(req, res) {
     const dealColumns = buildColumnValues({
       ciudad: ciudad_inmueble,
       registros: registros_publicos,
-      monto: monto_solicitado,
       contactItemId: contactId,
       columns: COLUMNS.acuerdos,
     });
@@ -358,7 +355,7 @@ export default async function handler(req, res) {
     const dealId = await createMondayItem({
       token,
       boardId: BOARDS.acuerdos,
-      groupId: GROUPS.leadsNuevos,
+      groupId: GROUPS.acuerdosActivos,
       itemName: `Lead - ${fullName}`,
       columnValues: dealColumns,
     });
