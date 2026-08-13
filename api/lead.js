@@ -164,10 +164,14 @@ function buildColumnValues({
   }
 
   if (columns.phone && phone) {
-    values[columns.phone] = {
-      phone: String(phone),
-      countryShortName: 'PE',
-    };
+    // Monday phone columns reject spaces/dashes (e.g. "940 873 307").
+    const digits = String(phone).replace(/\D/g, '');
+    if (digits) {
+      values[columns.phone] = {
+        phone: digits,
+        countryShortName: 'PE',
+      };
+    }
   }
 
   if (columns.ciudadInmueble && ciudad) {
